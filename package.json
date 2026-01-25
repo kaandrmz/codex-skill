@@ -1,0 +1,17 @@
+{
+  "name": "codex-orchestrator",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Claude Code skill to orchestrate OpenAI Codex for second opinions",
+  "scripts": {
+    "codex": "tsx scripts/codex.ts"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "latest",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "latest"
+  }
+}
