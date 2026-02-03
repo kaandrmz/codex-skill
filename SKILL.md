@@ -49,9 +49,113 @@ When `workingDirectory` is set:
 - Analyzing architecture or patterns across files
 - The user's code depends on project context
 
-## How to Use
+---
 
-### Step 1: Prepare the Prompt
+## Input Methods (in order of preference)
+
+### Method 1: File-Based Input (RECOMMENDED)
+
+**Use this for ANY prompt containing code, quotes, backticks, or special characters.**
+
+This method eliminates all shell escaping issues by having Claude write JSON to a file first, then pass the file path to the script.
+
+```bash
+# Step 1: Write JSON to a temp file using the Write tool
+# Step 2: Call the script with --input-file
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts --input-file /tmp/codex_input.json
+```
+
+**Example workflow:**
+1. Use the Write tool to create `/tmp/codex_input.json`:
+   ```json
+   {
+     "action": "new",
+     "prompt": "Review this code:\n\n```tsx\nfunction Test() {\n  return <div className=\"test\">{`value`}</div>;\n}\n```",
+     "topic": "React component review"
+   }
+   ```
+2. Run: `npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts --input-file /tmp/codex_input.json`
+
+### Method 2: Prompt File (for very large prompts)
+
+When the prompt itself is very large (e.g., entire files), use `--prompt-file` or `promptFile` to read the prompt from a separate file:
+
+**Via CLI argument:**
+```bash
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts \
+  --input-file /tmp/codex_input.json \
+  --prompt-file /tmp/prompt.txt
+```
+
+**Via JSON field:**
+```json
+{
+  "action": "new",
+  "promptFile": "/tmp/prompt.txt",
+  "topic": "large code review"
+}
+```
+
+The `--prompt-file` CLI argument takes precedence over both `prompt` and `promptFile` in the JSON.
+
+### Method 3: Simple CLI Arguments (for trivial prompts only)
+
+For simple prompts without any special characters:
+
+```bash
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts Review this sorting algorithm for efficiency
+```
+
+This automatically creates `{"action": "new", "prompt": "Review this sorting algorithm for efficiency"}`.
+
+### Method 4: Stdin JSON (LEGACY - avoid for complex prompts)
+
+Only use for simple prompts without special characters. Requires careful JSON escaping.
+
+```bash
+echo '{"action":"new","prompt":"Simple prompt here"}' | \
+  npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
+```
+
+**JSON Escaping Reference (when using stdin):**
+
+These characters MUST be escaped in the prompt value:
+- `"` → `\"`
+- `\` → `\\`
+- newlines → `\n`
+- tabs → `\t`
+- backticks → `` ` `` (no escaping needed in JSON, but watch shell escaping)
+
+**Warning:** Shell escaping combined with JSON escaping creates multiple layers that easily break with code snippets.
+
+---
+
+## Validation Mode
+
+Use `--validate` to test input parsing without calling the Codex API:
+
+```bash
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts \
+  --validate --input-file /tmp/codex_input.json
+```
+
+Returns:
+```json
+{
+  "valid": true,
+  "action": "new",
+  "promptLength": 1234,
+  "hasContext": false,
+  "hasTopic": true,
+  "hasWorkingDirectory": false
+}
+```
+
+This is useful for debugging input issues before making API calls.
+
+---
+
+## Preparing the Prompt
 
 Build a context-aware prompt based on what the user wants:
 
@@ -83,31 +187,93 @@ Review this code and provide feedback on correctness, clarity, and potential imp
 [CODE HERE]
 ```
 
-### Step 2: Run the Script
+---
 
-The skill directory is at: `~/.claude/skills/codex-orchestrator`
+## Complete Examples
 
-**For a new review (without codebase access):**
-```bash
-echo '{"action":"new","prompt":"YOUR PROMPT HERE","topic":"brief description"}' | \
-  npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
+### Example 1: Security Review with Code (File-Based)
+
+User: "Have codex check this auth function for security issues"
+
+**Step 1:** Write the input JSON to a temp file:
+```json
+{
+  "action": "new",
+  "prompt": "Review this authentication function for security vulnerabilities:\n\n```javascript\nfunction authenticate(username, password) {\n  const query = `SELECT * FROM users WHERE username=\"${username}\"`;\n  return db.execute(query);\n}\n```",
+  "topic": "auth function security review"
+}
 ```
 
-**For a new review (with codebase access):**
+**Step 2:** Run:
 ```bash
-echo '{"action":"new","prompt":"Review the auth module","workingDirectory":"/path/to/project"}' | \
-  npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts --input-file /tmp/codex_input.json
 ```
 
-**To continue a previous thread:**
-```bash
-echo '{"action":"continue","prompt":"How should I fix that issue?"}' | \
-  npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
+### Example 2: Codebase Review
+
+User: "Have codex review the payment processing module"
+
+```json
+{
+  "action": "new",
+  "prompt": "Review the payment processing module in src/payments/ for security and correctness",
+  "workingDirectory": "/Users/dev/ecommerce-app",
+  "topic": "payment module review"
+}
 ```
 
-### Step 3: Parse the Response
+### Example 3: Follow-up Question
+
+User: "Ask codex how to fix that SQL injection"
+
+```json
+{
+  "action": "continue",
+  "prompt": "How should I fix the SQL injection vulnerability you identified? Show me the corrected code."
+}
+```
+
+### Example 4: Large Code Review with Prompt File
+
+For reviewing entire files, write the code to a prompt file:
+
+**Step 1:** Write the prompt to `/tmp/prompt.txt`:
+```
+Review this entire module for bugs and security issues:
+
+[paste the entire file content here]
+```
+
+**Step 2:** Write minimal JSON to `/tmp/codex_input.json`:
+```json
+{
+  "action": "new",
+  "topic": "module review"
+}
+```
+
+**Step 3:** Run with both files:
+```bash
+npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts \
+  --input-file /tmp/codex_input.json \
+  --prompt-file /tmp/prompt.txt
+```
+
+### Example 5: Multi-turn Review Session
+
+```
+Turn 1: Write {"action":"new","prompt":"Review this sorting algorithm","topic":"sort review"} to file, run with --input-file
+Turn 2: Write {"action":"continue","prompt":"What about edge cases with empty arrays?"} to file, run with --input-file
+Turn 3: Write {"action":"continue","prompt":"Can you suggest a more efficient approach?"} to file, run with --input-file
+```
+
+---
+
+## Response Format
 
 The script returns JSON:
+
+**Success:**
 ```json
 {
   "success": true,
@@ -117,28 +283,24 @@ The script returns JSON:
 }
 ```
 
-On error:
+**Error:**
 ```json
 {
   "success": false,
-  "error": "Error message",
+  "error": "Error message with details",
   "canContinue": false
 }
 ```
 
-### Step 4: Present to User
+---
 
-Format Codex's response clearly:
-- Quote or summarize Codex's main points
-- Highlight agreements or disagreements with your own analysis
-- Note any actionable suggestions
-
-## Input Format
+## Input Format Reference
 
 ```json
 {
   "action": "new" | "continue",
   "prompt": "The review request or follow-up question",
+  "promptFile": "Optional: path to file containing the prompt",
   "context": "Optional: additional context to prepend to prompt",
   "topic": "Optional: brief description for state tracking",
   "workingDirectory": "Optional: path to project for codebase access"
@@ -148,52 +310,23 @@ Format Codex's response clearly:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `action` | Yes | `"new"` to start fresh, `"continue"` to resume thread |
-| `prompt` | Yes | The question or review request |
+| `prompt` | Yes* | The question or review request (*not required if using `promptFile`) |
+| `promptFile` | No | Path to file containing the prompt (alternative to `prompt`) |
 | `context` | No | Extra context prepended to prompt |
 | `topic` | No | Description saved in state for reference |
 | `workingDirectory` | No | Project path - gives Codex file access |
 
-## Examples
+---
 
-### Example 1: Security Review (inline code)
-User: "Have codex check this auth function for security issues"
+## CLI Arguments Reference
 
-```bash
-echo '{
-  "action": "new",
-  "prompt": "Review this authentication function for security vulnerabilities:\n\nfunction authenticate(username, password) {\n  const query = `SELECT * FROM users WHERE username=\"${username}\"`;\n  return db.execute(query);\n}",
-  "topic": "auth function security review"
-}' | npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
-```
+| Argument | Description |
+|----------|-------------|
+| `--input-file <path>` | Read JSON input from file (RECOMMENDED) |
+| `--prompt-file <path>` | Read prompt content from file |
+| `--validate` | Test input parsing without calling Codex API |
 
-### Example 2: Codebase Review
-User: "Have codex review the payment processing module"
-
-```bash
-echo '{
-  "action": "new",
-  "prompt": "Review the payment processing module in src/payments/ for security and correctness",
-  "workingDirectory": "/Users/dev/ecommerce-app",
-  "topic": "payment module review"
-}' | npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
-```
-
-### Example 3: Follow-up Question
-User: "Ask codex how to fix that SQL injection"
-
-```bash
-echo '{
-  "action": "continue",
-  "prompt": "How should I fix the SQL injection vulnerability you identified? Show me the corrected code."
-}' | npx --prefix ~/.claude/skills/codex-orchestrator tsx ~/.claude/skills/codex-orchestrator/scripts/codex.ts
-```
-
-### Example 4: Multi-turn Review Session
-```
-Turn 1: echo '{"action":"new","prompt":"Review this sorting algorithm","topic":"sort review"}' | ...
-Turn 2: echo '{"action":"continue","prompt":"What about edge cases with empty arrays?"}' | ...
-Turn 3: echo '{"action":"continue","prompt":"Can you suggest a more efficient approach?"}' | ...
-```
+---
 
 ## Error Handling
 
@@ -204,9 +337,13 @@ If the script fails:
 
 Common errors:
 - `"OPENAI_API_KEY environment variable not set"` → Check `.env` file
-- `"Invalid JSON input"` → Check JSON formatting (escape special chars)
+- `"Invalid JSON input: ..."` → JSON parsing failed (use --input-file to avoid escaping issues)
+- `"Failed to read input file ..."` → Check file path exists and is readable
+- `"Invalid action ..."` → action must be "new" or "continue"
 - Network errors → Check internet connection
 - `"Not inside a trusted directory"` → Use `workingDirectory` for a git repo
+
+---
 
 ## Notes
 
@@ -215,3 +352,4 @@ Common errors:
 - Thread state is saved in `scripts/state.json`
 - You control thread lifecycle via `action` field
 - Codebase access requires `workingDirectory` pointing to a valid path
+- **Always prefer `--input-file` for prompts containing code**

@@ -56,34 +56,97 @@ function output(data: Output): void {
 }
 
 async function main(): Promise<void> {
-  // Read input from stdin
+  // Parse CLI arguments
+  const args = process.argv.slice(2);
+  const inputFileIndex = args.indexOf("--input-file");
+  const promptFileIndex = args.indexOf("--prompt-file");
+  const validateMode = args.includes("--validate");
+
   let inputData = "";
 
-  // Check if stdin has data
-  if (!process.stdin.isTTY) {
-    inputData = readFileSync(process.stdin.fd, "utf-8");
-  } else {
-    // Fallback: read from command line args
-    const args = process.argv.slice(2);
-    if (args.length === 0) {
+  // Priority 1: --input-file (RECOMMENDED - avoids all shell escaping)
+  if (inputFileIndex !== -1 && args[inputFileIndex + 1]) {
+    const inputPath = args[inputFileIndex + 1];
+    try {
+      inputData = readFileSync(inputPath, "utf-8");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       output({
         success: false,
-        error: "No input provided. Pipe JSON or pass prompt as argument.",
+        error: `Failed to read input file "${inputPath}": ${errorMessage}`,
         canContinue: false,
       });
       process.exit(1);
     }
-    // Simple mode: just a prompt string
+  }
+  // Priority 2: stdin (if available)
+  else if (!process.stdin.isTTY) {
+    inputData = readFileSync(process.stdin.fd, "utf-8");
+  }
+  // Priority 3: simple CLI args (prompt as arguments)
+  else if (args.length > 0 && !args[0].startsWith("--")) {
     inputData = JSON.stringify({ action: "new", prompt: args.join(" ") });
+  }
+  // No input provided
+  else {
+    output({
+      success: false,
+      error: "No input provided. Use --input-file, pipe JSON to stdin, or pass prompt as argument.",
+      canContinue: false,
+    });
+    process.exit(1);
   }
 
   let input: Input;
   try {
     input = JSON.parse(inputData);
-  } catch {
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    const preview = inputData.slice(0, 200);
     output({
       success: false,
-      error: "Invalid JSON input",
+      error: `Invalid JSON input: ${errorMessage}. Preview: ${JSON.stringify(preview)}`,
+      canContinue: false,
+    });
+    process.exit(1);
+  }
+
+  // Handle --prompt-file: read prompt content from a separate file
+  if (promptFileIndex !== -1 && args[promptFileIndex + 1]) {
+    const promptPath = args[promptFileIndex + 1];
+    try {
+      input.prompt = readFileSync(promptPath, "utf-8");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      output({
+        success: false,
+        error: `Failed to read prompt file "${promptPath}": ${errorMessage}`,
+        canContinue: false,
+      });
+      process.exit(1);
+    }
+  }
+  // Also support promptFile in JSON input
+  else if ((input as Input & { promptFile?: string }).promptFile) {
+    const promptPath = (input as Input & { promptFile?: string }).promptFile!;
+    try {
+      input.prompt = readFileSync(promptPath, "utf-8");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      output({
+        success: false,
+        error: `Failed to read prompt file "${promptPath}": ${errorMessage}`,
+        canContinue: false,
+      });
+      process.exit(1);
+    }
+  }
+
+  // Validate action field
+  if (!["new", "continue"].includes(input.action)) {
+    output({
+      success: false,
+      error: `Invalid action "${input.action}". Must be "new" or "continue".`,
       canContinue: false,
     });
     process.exit(1);
@@ -96,6 +159,19 @@ async function main(): Promise<void> {
       canContinue: false,
     });
     process.exit(1);
+  }
+
+  // Validate mode: test input parsing without calling Codex API
+  if (validateMode) {
+    console.log(JSON.stringify({
+      valid: true,
+      action: input.action,
+      promptLength: input.prompt.length,
+      hasContext: !!input.context,
+      hasTopic: !!input.topic,
+      hasWorkingDirectory: !!input.workingDirectory,
+    }, null, 2));
+    process.exit(0);
   }
 
   // Check for API key
